@@ -112,7 +112,7 @@
       font-size: 13px;
       color: var(--text-muted);
     }
-
+    
     .full-bleed {
       width: 100%;
       padding-left: 20px;
@@ -151,6 +151,86 @@
       gap: 16px;
     }
     
+    /* Confirmation Modal Styling */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .modal-card {
+      background: #ffffff;
+      width: 90%;
+      max-width: 360px;
+      border-radius: 20px;
+      padding: 24px;
+      text-align: center;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+      transform: scale(0.9);
+      transition: transform 0.25s ease;
+    }
+    .modal-overlay.active .modal-card {
+      transform: scale(1);
+    }
+    .modal-icon {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+    .modal-title {
+      margin: 0 0 8px 0;
+      font-size: 18px;
+      font-weight: 700;
+      color: #1a202c;
+    }
+    .modal-text {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin: 0 0 20px 0;
+      line-height: 1.4;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .modal-btn {
+      flex: 1;
+      padding: 10px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    .modal-btn-cancel {
+      background: var(--bg-gray);
+      color: #1a202c;
+    }
+    .modal-btn-cancel:hover {
+      background: #e2e8f0;
+    }
+    .modal-btn-danger {
+      background: var(--danger);
+      color: #ffffff;
+    }
+    .modal-btn-danger:hover {
+      background: #e53e3e;
+    }
+
+
+
+
     .circle-icon-wrapper {
       position: relative;
       width: 48px;
@@ -302,10 +382,10 @@
     </div>
 
     <div class="full-bleed" style="padding-top: 16px; padding-bottom: 8px;">
-      <div class="section-header">
-        <h3>Budget categories</h3>
-        <span style="color:var(--text-muted); cursor:pointer;">•••</span>
-      </div>
+     <div class="section-header">
+      <h3>Budget categories</h3>
+      <button type="button" onclick="openCategoryModal()" style="background: var(--bg-gray); border: 1px solid var(--border); padding: 6px 12px; border-radius: 12px; font-weight: 600; font-size: 13px; cursor: pointer;">+ Add</button>
+    </div>
       
       <div id="categoryContainer" class="category-list"></div>
     </div>
@@ -366,6 +446,34 @@
   <div id="userEmail" class="user-badge">Loading instance context...</div>
 </div>
 
+<!-- Custom Confirmation Modal -->
+<div id="confirmModal" class="modal-overlay">
+  <div class="modal-card">
+    <div class="modal-icon">🗑️</div>
+    <h4 class="modal-title">Delete Transaction?</h4>
+    <p class="modal-text">Are you sure you want to delete this expense entry? This action cannot be undone.</p>
+    <div class="modal-actions">
+      <button class="modal-btn modal-btn-cancel" onclick="closeDeleteModal()">Cancel</button>
+      <button id="confirmDeleteBtn" class="modal-btn modal-btn-danger">Delete</button>
+    </div>
+  </div>
+</div>
+<!-- Custom Add Category Modal -->
+<div id="categoryModal" class="modal-overlay">
+  <div class="modal-card">
+    <div class="modal-icon">➕</div>
+    <h4 class="modal-title">Add Budget Category</h4>
+    <form id="addCategoryForm" onsubmit="handleCategorySubmit(event)">
+      <input type="text" id="newCatName" placeholder="Category Name (e.g. Groceries)" required style="margin-bottom: 12px;">
+      <input type="number" id="newCatBudget" step="0.01" min="1" placeholder="Budget Amount (ZAR)" required style="margin-bottom: 20px;">
+      
+      <div class="modal-actions">
+        <button type="button" class="modal-btn modal-btn-cancel" onclick="closeCategoryModal()">Cancel</button>
+        <button type="submit" id="saveCatBtn" class="modal-btn" style="background: var(--primary); color: white;">Save Category</button>
+      </div>
+    </form>
+  </div>
+</div>
 <!-- Floating Toast Popup -->
 <div id="toast" class="toast">
   <span>✓</span> <span id="toastMsg">Expense logged successfully!</span>
@@ -486,6 +594,33 @@
     progressBar.style.backgroundColor = globalRemaining < 0 ? 'var(--danger)' : 'var(--success)';
   }
 
+  function openCategoryModal() {
+    document.getElementById('addCategoryForm').reset();
+    document.getElementById('categoryModal').classList.add('active');
+  }
+
+  function closeCategoryModal() {
+    document.getElementById('categoryModal').classList.remove('active');
+  }
+
+  function handleCategorySubmit(event) {
+    event.preventDefault();
+    let name = document.getElementById('newCatName').value;
+    let budget = document.getElementById('newCatBudget').value;
+    let btn = document.getElementById('saveCatBtn');
+
+    btn.innerText = "Adding...";
+    btn.disabled = true;
+
+    google.script.run.withSuccessHandler(function() {
+      closeCategoryModal();
+      btn.innerText = "Save Category";
+      btn.disabled = false;
+      showToast("Category added successfully!");
+      loadUserData(); // Reloads categories & update dropdowns
+    }).addCategory(name, budget);
+  }
+  
   function renderRecentTransactions(txList) {
     let container = document.getElementById('recentTxContainer');
     if (!txList || txList.length === 0) {
@@ -576,13 +711,41 @@
     checkOverBudgetWarning();
   }
 
+  
+
   function confirmDeleteTx(rowIndex) {
-    if (confirm("Are you sure you want to delete this expense entry?")) {
-      google.script.run.withSuccessHandler(function() {
-        showToast("Expense deleted successfully!");
-        loadUserData();
-      }).deleteExpense(rowIndex);
-    }
+    pendingDeleteRowIndex = rowIndex;
+    let modal = document.getElementById('confirmModal');
+    let confirmBtn = document.getElementById('confirmDeleteBtn');
+
+    // Attach click listener dynamically for target row
+    confirmBtn.onclick = function() {
+      executeDeleteTx();
+    };
+
+    modal.classList.add('active');
+  }
+
+  function closeDeleteModal() {
+    let modal = document.getElementById('confirmModal');
+    modal.classList.remove('active');
+    pendingDeleteRowIndex = null;
+  }
+
+  function executeDeleteTx() {
+    if (!pendingDeleteRowIndex) return;
+    
+    let confirmBtn = document.getElementById('confirmDeleteBtn');
+    confirmBtn.innerText = "Deleting...";
+    confirmBtn.disabled = true;
+
+    google.script.run.withSuccessHandler(function() {
+      closeDeleteModal();
+      confirmBtn.innerText = "Delete";
+      confirmBtn.disabled = false;
+      showToast("Expense deleted successfully!");
+      loadUserData();
+    }).deleteExpense(pendingDeleteRowIndex);
   }
 
   function handleFormSubmit(event) {

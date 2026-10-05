@@ -21,7 +21,7 @@ function getUserBudgetData() {
   var targetEmail = activeUserEmail.toLowerCase().trim();
   var ss = getSpreadsheet();
 
-  // 1. Fetch Currency Exchange Rates from Settings sheet
+  // 1. Fetch Exchange Rates
   var settingsSheet = ss.getSheetByName("Settings");
   var rates = { "ZAR": 1.0, "BWP": 1.15 }; 
   if (settingsSheet) {
@@ -33,7 +33,41 @@ function getUserBudgetData() {
     }
   }
 
-  // 2. Fetch Budgets
+  // 2. Fetch User Transactions first (to sum spending per category)
+  var expenseSheet = ss.getSheetByName("Expense_Log");
+  var userTransactions = [];
+  var categorySpentMap = {}; // Tracks sum of ZAR spent per category
+
+  if (expenseSheet) {
+    var expenseData = expenseSheet.getDataRange().getValues();
+    for (var j = expenseData.length - 1; j >= 1; j--) {
+      if (!expenseData[j][0]) continue;
+      var expEmail = expenseData[j][0].toString().toLowerCase().trim();
+      
+      if (expEmail === targetEmail) {
+        var rawDate = expenseData[j][2];
+        var formattedDate = rawDate instanceof Date ? rawDate.toLocaleDateString("en-ZA") : rawDate.toString();
+        var cat = expenseData[j][3];
+        var priceZar = parseFloat(expenseData[j][7]) || 0;
+
+        // Sum spending per category
+        categorySpentMap[cat] = (categorySpentMap[cat] || 0) + priceZar;
+
+        userTransactions.push({
+          rowIndex: j + 1,
+          rowId: expenseData[j][1],
+          date: formattedDate,
+          category: cat,
+          price: parseFloat(expenseData[j][4]) || 0,
+          reason: expenseData[j][5] || '',
+          currency: expenseData[j][6] || 'ZAR',
+          priceZar: priceZar
+        });
+      }
+    }
+  }
+
+  // 3. Fetch Budgets & dynamically compute remaining balances
   var budgetSheet = ss.getSheetByName("Budget_Master");
   var budgetData = budgetSheet.getDataRange().getValues();
   var userBudgets = {};
@@ -41,42 +75,15 @@ function getUserBudgetData() {
   for (var i = 1; i < budgetData.length; i++) {
     if (!budgetData[i][0]) continue;
     var rowEmail = budgetData[i][0].toString().toLowerCase().trim();
+    
     if (rowEmail === targetEmail) {
       var category = budgetData[i][1];                    
       var allocated = parseFloat(budgetData[i][2]) || 0;  
-      var remaining = parseFloat(budgetData[i][3]) || 0;  
-      var spent = allocated - remaining;            
+      var spent = categorySpentMap[category] || 0;
+      var remaining = allocated - spent;            
 
       if (category) {
         userBudgets[category] = { allocated: allocated, remaining: remaining, spent: spent };
-      }
-    }
-  }
-
-  // 3. Fetch User Transactions (Updated for 8-column layout)
-  var expenseSheet = ss.getSheetByName("Expense_Log");
-  var userTransactions = [];
-  if (expenseSheet) {
-    var expenseData = expenseSheet.getDataRange().getValues();
-    for (var j = expenseData.length - 1; j >= 1; j--) {
-      if (!expenseData[j][0]) continue;
-      var expEmail = expenseData[j][0].toString().toLowerCase().trim();
-      if (expEmail === targetEmail) {
-        var rawDate = expenseData[j][2];
-        var formattedDate = rawDate instanceof Date 
-          ? rawDate.toLocaleDateString("en-ZA") 
-          : rawDate.toString();
-
-        userTransactions.push({
-          rowIndex: j + 1,
-          rowId: expenseData[j][1],
-          date: formattedDate,
-          category: expenseData[j][3],
-          price: parseFloat(expenseData[j][4]) || 0,
-          reason: expenseData[j][5] || '',
-          currency: expenseData[j][6] || 'ZAR',
-          priceZar: parseFloat(expenseData[j][7]) || 0
-        });
       }
     }
   }
@@ -108,6 +115,20 @@ function logExpense(category, price, reason, currency) {
   
   // Appends: User Email | Row_ID | Date | Category | Price | Reason | Currency | Amount(ZAR)
   sheet.appendRow([activeUserEmail, rowId, today, category, price, reason, currency, priceZar]);
+  return "Success";
+}
+// POST: Add a new category to Budget_Master
+function addCategory(categoryName, budgetAmount) {
+  var activeUserEmail = Session.getActiveUser().getEmail();
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName("Budget_Master");
+  if (!sheet) throw new Error("Sheet 'Budget_Master' not found.");
+
+  var name = categoryName.trim();
+  var allocated = parseFloat(budgetAmount) || 0;
+
+  // Append 3 columns: User Email | Category | Budget Allocated
+  sheet.appendRow([activeUserEmail, name, allocated]);
   return "Success";
 }
 
