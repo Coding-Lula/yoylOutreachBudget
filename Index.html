@@ -11,7 +11,6 @@
       --bg-gray: #f8f9fa;
       --border: #edf2f7;
       --text-muted: #718096;
-      --modal-bg: #1a202c;
     }
 
     * {
@@ -252,13 +251,13 @@
 
     .user-badge { font-size: 11px; text-align: center; color: var(--text-muted); margin-top: auto; padding: 15px; }
 
-    /* Floating Toast Popup */
+    /* Toast Notification */
     .toast {
       position: fixed;
       bottom: 24px;
       left: 50%;
       transform: translateX(-50%) translateY(100px);
-      background: var(--modal-bg);
+      background: #1a202c;
       color: #ffffff;
       padding: 12px 24px;
       border-radius: 25px;
@@ -275,94 +274,6 @@
     .toast.show {
       transform: translateX(-50%) translateY(0);
       opacity: 1;
-    }
-    .toast-icon {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 20px;
-      height: 20px;
-      background: var(--success);
-      color: #ffffff;
-      border-radius: 50%;
-      font-size: 12px;
-      font-weight: bold;
-    }
-
-    /* Custom Confirmation Modal Overlay */
-    .modal-overlay {
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0, 0, 0, 0.5);
-      backdrop-filter: blur(4px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 2000;
-      opacity: 0;
-      visibility: hidden;
-      transition: opacity 0.2s ease, visibility 0.2s ease;
-      padding: 20px;
-    }
-    .modal-overlay.show {
-      opacity: 1;
-      visibility: visible;
-    }
-    .modal-card {
-      background: var(--modal-bg);
-      color: #ffffff;
-      border: 1px solid #2d3748;
-      border-radius: 16px;
-      padding: 24px;
-      width: 100%;
-      max-width: 380px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-      transform: scale(0.95);
-      transition: transform 0.2s ease;
-    }
-    .modal-overlay.show .modal-card {
-      transform: scale(1);
-    }
-    .modal-title {
-      font-size: 18px;
-      font-weight: 700;
-      margin-bottom: 8px;
-      color: #ffffff;
-    }
-    .modal-body {
-      font-size: 14px;
-      color: #a0aec0;
-      margin-bottom: 24px;
-      line-height: 1.5;
-    }
-    .modal-actions {
-      display: flex;
-      gap: 12px;
-      justify-content: flex-end;
-    }
-    .modal-btn {
-      padding: 10px 18px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      border: none;
-      transition: all 0.2s ease;
-    }
-    .modal-btn-cancel {
-      background: transparent;
-      border: 1px solid #4a5568;
-      color: #e2e8f0;
-    }
-    .modal-btn-cancel:hover {
-      background: #2d3748;
-    }
-    .modal-btn-confirm {
-      background: var(--danger);
-      color: #ffffff;
-    }
-    .modal-btn-confirm:hover {
-      background: #e53e3e;
     }
   </style>
 </head>
@@ -457,28 +368,14 @@
 
 <!-- Floating Toast Popup -->
 <div id="toast" class="toast">
-  <span class="toast-icon">✓</span>
-  <span id="toastMsg">Expense logged successfully!</span>
-</div>
-
-<!-- Custom Confirmation Modal Overlay -->
-<div id="confirmModal" class="modal-overlay">
-  <div class="modal-card">
-    <div id="modalTitle" class="modal-title">Delete Transaction</div>
-    <div id="modalBody" class="modal-body">Are you sure you want to delete this expense entry? This action cannot be undone.</div>
-    <div class="modal-actions">
-      <button id="modalCancelBtn" class="modal-btn modal-btn-cancel">Cancel</button>
-      <button id="modalConfirmBtn" class="modal-btn modal-btn-confirm">Delete</button>
-    </div>
-  </div>
+  <span>✓</span> <span id="toastMsg">Expense logged successfully!</span>
 </div>
 
 <script>
   let userBudgets = {};
   let recentTransactions = [];
   let exchangeRates = { "ZAR": 1.0, "BWP": 1.15 };
-  let editingRowId = null;
-  let pendingDeleteRowId = null;
+  let editingRowIndex = null;
   
   const emojiMap = { 
     'food': '🍲', 
@@ -624,8 +521,8 @@
         <div class="tx-right">
           <div class="tx-price">- ${currSymbol}${parseFloat(tx.price).toFixed(2)}</div>
           <div class="tx-actions">
-            <button class="action-btn" title="Edit" onclick="editTx('${tx.rowId}', '${tx.category}', ${tx.price}, '${escapeQuotes(tx.reason)}', '${tx.currency || 'ZAR'}')">✏️</button>
-            <button class="action-btn" title="Delete" onclick="confirmDeleteTx('${tx.rowId}')">🗑️</button>
+            <button class="action-btn" title="Edit" onclick="editTx(${tx.rowIndex}, '${tx.category}', ${tx.price}, '${escapeQuotes(tx.reason)}', '${tx.currency || 'ZAR'}')">✏️</button>
+            <button class="action-btn" title="Delete" onclick="confirmDeleteTx(${tx.rowIndex})">🗑️</button>
           </div>
         </div>
       </div>
@@ -663,8 +560,8 @@
     warningEl.style.display = 'none';
   }
 
-  function editTx(rowId, category, price, reason, currency) {
-    editingRowId = rowId;
+  function editTx(rowIndex, category, price, reason, currency) {
+    editingRowIndex = rowIndex;
     document.getElementById('category').value = category;
     document.getElementById('price').value = price;
     document.getElementById('reason').value = reason;
@@ -679,32 +576,14 @@
     checkOverBudgetWarning();
   }
 
-  function confirmDeleteTx(rowId) {
-    pendingDeleteRowId = rowId;
-    let modal = document.getElementById('confirmModal');
-    modal.classList.add('show');
-  }
-
-  function closeConfirmModal() {
-    pendingDeleteRowId = null;
-    let modal = document.getElementById('confirmModal');
-    modal.classList.remove('show');
-  }
-
-  document.getElementById('modalCancelBtn').onclick = function() {
-    closeConfirmModal();
-  };
-
-  document.getElementById('modalConfirmBtn').onclick = function() {
-    if (pendingDeleteRowId) {
-      let rowIdToDelete = pendingDeleteRowId;
-      closeConfirmModal();
+  function confirmDeleteTx(rowIndex) {
+    if (confirm("Are you sure you want to delete this expense entry?")) {
       google.script.run.withSuccessHandler(function() {
         showToast("Expense deleted successfully!");
         loadUserData();
-      }).deleteExpense(rowIdToDelete);
+      }).deleteExpense(rowIndex);
     }
-  };
+  }
 
   function handleFormSubmit(event) {
     event.preventDefault();
@@ -716,13 +595,13 @@
 
     submitBtn.disabled = true;
 
-    if (editingRowId) {
+    if (editingRowIndex) {
       submitBtn.innerText = "Updating...";
       google.script.run.withSuccessHandler(function() {
         showToast("Expense updated successfully!");
         resetForm();
         loadUserData();
-      }).updateExpense(editingRowId, category, price, reason, currency);
+      }).updateExpense(editingRowIndex, category, price, reason, currency);
     } else {
       submitBtn.innerText = "Logging...";
       google.script.run.withSuccessHandler(function() {
@@ -734,7 +613,7 @@
   }
 
   function resetForm() {
-    editingRowId = null;
+    editingRowIndex = null;
     document.getElementById('expenseForm').reset();
     document.getElementById('formHeader').innerText = "Log Transaction";
     document.getElementById('budgetWarning').style.display = 'none';
