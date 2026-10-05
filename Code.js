@@ -4,13 +4,29 @@ function doGet() {
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+// HELPER: Get spreadsheet using Script Property or fall back to Active Spreadsheet
+function getSpreadsheet() {
+  var spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  if (spreadsheetId) {
+    return SpreadsheetApp.openById(spreadsheetId);
+  }
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+// UTILITY: Set Spreadsheet ID script property
+function setSpreadsheetId(id) {
+  PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', id);
+  return "Spreadsheet ID set successfully to: " + id;
+}
+
 // GET: Fetch budgets, exchange rates, and user transactions
 function getUserBudgetData() {
+  var ss = getSpreadsheet();
   var activeUserEmail = Session.getActiveUser().getEmail();
   var targetEmail = activeUserEmail.toLowerCase().trim();
 
   // 1. Fetch Currency Exchange Rates from Settings sheet
-  var settingsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Settings");
+  var settingsSheet = ss.getSheetByName("Settings");
   var rates = { "ZAR": 1.0, "BWP": 1.15 }; // Default fallback values
   if (settingsSheet) {
     var settingsData = settingsSheet.getDataRange().getValues();
@@ -22,27 +38,29 @@ function getUserBudgetData() {
   }
 
   // 2. Fetch Budgets
-  var budgetSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Budget_Master");
-  var budgetData = budgetSheet.getDataRange().getValues();
+  var budgetSheet = ss.getSheetByName("Budget_Master");
   var userBudgets = {};
-  
-  for (var i = 1; i < budgetData.length; i++) {
-    if (!budgetData[i][0]) continue;
-    var rowEmail = budgetData[i][0].toString().toLowerCase().trim();
-    if (rowEmail === targetEmail) {
-      var category = budgetData[i][1];                    
-      var allocated = parseFloat(budgetData[i][2]) || 0;  
-      var remaining = parseFloat(budgetData[i][3]) || 0;  
-      var spent = allocated - remaining;            
+  if (budgetSheet) {
+    var budgetData = budgetSheet.getDataRange().getValues();
+    for (var i = 1; i < budgetData.length; i++) {
+      if (!budgetData[i][0]) continue;
+      var rowEmail = budgetData[i][0].toString().toLowerCase().trim();
+      if (rowEmail === targetEmail) {
+        var category = budgetData[i][1];
+        var allocated = parseFloat(budgetData[i][2]) || 0;
+        var remaining = parseFloat(budgetData[i][3]) || 0;
+        var spent = allocated - remaining;
 
-      if (category) {
-        userBudgets[category] = { allocated: allocated, remaining: remaining, spent: spent };
+        if (category) {
+          userBudgets[category] = { allocated: allocated, remaining: remaining, spent: spent };
+        }
       }
     }
   }
 
-  // 3. Fetch User Transactions (Newest first, passing row index)
-  var expenseSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Expense_Log");
+  // 3. Fetch User Transactions (Newest first, searching Expense_Log)
+  // Headers: User Email | Row_ID | Date | Category | Price | Reason | Currency | Amount(ZAR)
+  var expenseSheet = ss.getSheetByName("Expense_Log");
   var userTransactions = [];
   if (expenseSheet) {
     var expenseData = expenseSheet.getDataRange().getValues();
@@ -51,13 +69,13 @@ function getUserBudgetData() {
       var expEmail = expenseData[j][0].toString().toLowerCase().trim();
       if (expEmail === targetEmail) {
         userTransactions.push({
-          rowIndex: j + 1, // 1-based row index in Google Sheet
-          date: expenseData[j][1],
-          category: expenseData[j][2],
-          price: parseFloat(expenseData[j][3]) || 0,
-          reason: expenseData[j][4] || '',
-          currency: expenseData[j][5] || 'ZAR',
-          priceZar: parseFloat(expenseData[j][6]) || parseFloat(expenseData[j][3]) || 0
+          rowId: expenseData[j][1] ? expenseData[j][1].toString() : '',
+          date: expenseData[j][2],
+          category: expenseData[j][3],
+          price: parseFloat(expenseData[j][4]) || 0,
+          reason: expenseData[j][5] || '',
+          currency: expenseData[j][6] || 'ZAR',
+          priceZar: parseFloat(expenseData[j][7]) || parseFloat(expenseData[j][4]) || 0
         });
       }
     }
@@ -73,11 +91,12 @@ function getUserBudgetData() {
 
 // POST: Log a new transaction
 function logExpense(category, price, reason, currency) {
+  var ss = getSpreadsheet();
   var activeUserEmail = Session.getActiveUser().getEmail();
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Expense_Log");
+  var sheet = ss.getSheetByName("Expense_Log");
   if (!sheet) throw new Error("Sheet 'Expense_Log' not found.");
   
-  var settingsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Settings");
+  var settingsSheet = ss.getSheetByName("Settings");
   var rate = 1.0;
   if (currency === 'BWP' && settingsSheet) {
     rate = parseFloat(settingsSheet.getRange("B3").getValue()) || 1.15;
@@ -85,39 +104,67 @@ function logExpense(category, price, reason, currency) {
 
   var priceZar = price * rate;
   var today = new Date().toLocaleDateString("en-ZA");
+  var rowId = Utilities.getUuid();
   
-  // Appends: User Email | Date | Category | Price | Reason | Currency | Price (ZAR)
-  sheet.appendRow([activeUserEmail, today, category, price, reason, currency, priceZar]);
+  // Headers: User Email | Row_ID | Date | Category | Price | Reason | Currency | Amount(ZAR)
+  sheet.appendRow([activeUserEmail, rowId, today, category, price, reason, currency, priceZar]);
   return "Success";
 }
 
-// PUT: Update existing transaction by row index
-function updateExpense(rowIndex, category, price, reason, currency) {
+// PUT: Update existing transaction by Row_ID
+function updateExpense(rowId, category, price, reason, currency) {
+  var ss = getSpreadsheet();
   var activeUserEmail = Session.getActiveUser().getEmail().toLowerCase().trim();
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Expense_Log");
-  
-  var rowEmail = sheet.getRange(rowIndex, 1).getValue().toString().toLowerCase().trim();
+  var sheet = ss.getSheetByName("Expense_Log");
+  if (!sheet) throw new Error("Sheet 'Expense_Log' not found.");
+
+  var expenseData = sheet.getDataRange().getValues();
+  var targetRowIndex = -1;
+  for (var i = 1; i < expenseData.length; i++) {
+    if (expenseData[i][1] && expenseData[i][1].toString() === rowId.toString()) {
+      targetRowIndex = i + 1; // 1-based index
+      break;
+    }
+  }
+
+  if (targetRowIndex === -1) throw new Error("Transaction not found.");
+
+  var rowEmail = sheet.getRange(targetRowIndex, 1).getValue().toString().toLowerCase().trim();
   if (rowEmail !== activeUserEmail) throw new Error("Unauthorized update request.");
 
-  var settingsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Settings");
+  var settingsSheet = ss.getSheetByName("Settings");
   var rate = 1.0;
   if (currency === 'BWP' && settingsSheet) {
     rate = parseFloat(settingsSheet.getRange("B3").getValue()) || 1.15;
   }
   var priceZar = price * rate;
 
-  sheet.getRange(rowIndex, 3, 1, 5).setValues([[category, price, reason, currency, priceZar]]);
+  // Update Category (Col 4), Price (Col 5), Reason (Col 6), Currency (Col 7), Amount(ZAR) (Col 8)
+  sheet.getRange(targetRowIndex, 4, 1, 5).setValues([[category, price, reason, currency, priceZar]]);
   return "Success";
 }
 
-// DELETE: Delete transaction by row index
-function deleteExpense(rowIndex) {
+// DELETE: Delete transaction by Row_ID
+function deleteExpense(rowId) {
+  var ss = getSpreadsheet();
   var activeUserEmail = Session.getActiveUser().getEmail().toLowerCase().trim();
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Expense_Log");
-  
-  var rowEmail = sheet.getRange(rowIndex, 1).getValue().toString().toLowerCase().trim();
+  var sheet = ss.getSheetByName("Expense_Log");
+  if (!sheet) throw new Error("Sheet 'Expense_Log' not found.");
+
+  var expenseData = sheet.getDataRange().getValues();
+  var targetRowIndex = -1;
+  for (var i = 1; i < expenseData.length; i++) {
+    if (expenseData[i][1] && expenseData[i][1].toString() === rowId.toString()) {
+      targetRowIndex = i + 1; // 1-based index
+      break;
+    }
+  }
+
+  if (targetRowIndex === -1) throw new Error("Transaction not found.");
+
+  var rowEmail = sheet.getRange(targetRowIndex, 1).getValue().toString().toLowerCase().trim();
   if (rowEmail !== activeUserEmail) throw new Error("Unauthorized delete request.");
 
-  sheet.deleteRow(rowIndex);
+  sheet.deleteRow(targetRowIndex);
   return "Success";
 }
